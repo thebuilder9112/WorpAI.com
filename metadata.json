@@ -1,0 +1,7 @@
+{
+  "name": "Worp AI",
+  "description": "A dynamic, atmospheric AI chat interface with customizable themes.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}

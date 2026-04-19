@@ -1,0 +1,171 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId}
+    // Fields:
+    //   - uid: string (required) - Unique user ID
+    //   - email: string (required) - User email
+    //   - displayName: string (optional) - User display name
+    //   - photoURL: string (optional) - User profile picture URL
+    //   - theme: map (optional) - User theme settings
+    //   - createdAt: timestamp (required) - Creation time
+    //
+    // Collection: users/{userId}/chats
+    // Document ID: auto-generated
+    // Fields:
+    //   - userId: string (required) - Owner of the message
+    //   - role: string (required, enum: ['user', 'ai']) - Message role
+    //   - text: string (required) - Message text
+    //   - image: string (optional) - Generated image URL
+    //   - isError: bool (optional) - Error flag
+    //   - mode: string (optional) - Chat mode
+    //   - createdAt: timestamp (required) - Creation time
+    //
+    // Collection: users/{userId}/threads
+    // Document ID: auto-generated
+    // Fields:
+    //   - userId: string (required) - Owner of the thread
+    //   - title: string (required) - Thread title
+    //   - lastMessage: string (optional) - Last message in thread
+    //   - createdAt: timestamp (required) - Creation time
+    //   - updatedAt: timestamp (required) - Last update time
+    //
+    // Collection: users/{userId}/threads/{threadId}/messages
+    // Document ID: auto-generated
+    // Fields:
+    //   - userId: string (required) - Owner of the message
+    //   - role: string (required, enum: ['user', 'ai']) - Message role
+    //   - text: string (required) - Message text
+    //   - image: string (optional) - Generated image URL
+    //   - isError: bool (optional) - Error flag
+    //   - mode: string (optional) - Chat mode
+    //   - createdAt: timestamp (required) - Creation time
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "aumchauhan11@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidUrl(url) {
+      return url is string && (url.matches("^https://.*") || url.matches("^http://.*") || url.matches("^data:image/.*"));
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return hasRequiredFields(['uid', 'email', 'createdAt']) &&
+             data.uid == request.auth.uid &&
+             isValidEmail(data.email) &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidThread(data, userId) {
+      return hasRequiredFields(['userId', 'title', 'createdAt', 'updatedAt']) &&
+             data.userId == userId &&
+             data.userId == request.auth.uid &&
+             data.title is string &&
+             data.title.size() > 0 &&
+             data.title.size() < 100 &&
+             data.createdAt is timestamp &&
+             data.updatedAt is timestamp;
+    }
+
+    function isValidMessage(data, userId) {
+      return hasRequiredFields(['userId', 'role', 'text', 'createdAt']) &&
+             data.userId == userId &&
+             data.userId == request.auth.uid &&
+             data.role in ['user', 'ai'] &&
+             data.text is string &&
+             data.text.size() < 10000 &&
+             data.createdAt is timestamp &&
+             (!('image' in data) || isValidUrl(data.image)) &&
+             (!('attachments' in data) || data.attachments is list);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      // Users can only read their own profile
+      allow read: if isOwner(userId) || isAdmin();
+      
+      // Users can only create their own profile
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      
+      // Users can only update their own profile, but cannot change their role unless admin
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && 
+                    (request.resource.data.role == resource.data.role || isAdmin());
+      
+      // Only admins can delete users
+      allow delete: if isAdmin();
+
+      match /threads/{threadId} {
+        // Users can only read their own threads
+        allow read: if isOwner(userId) || isAdmin();
+        
+        // Users can only create their own threads
+        allow create: if isOwner(userId) && isValidThread(request.resource.data, userId);
+        
+        // Users can only update their own threads
+        allow update: if isOwner(userId) && isValidThread(request.resource.data, userId);
+        
+        // Users can delete their own threads
+        allow delete: if isOwner(userId) || isAdmin();
+
+        match /messages/{messageId} {
+          // Users can only read their own messages
+          allow read: if isOwner(userId) || isAdmin();
+          
+          // Users can only create their own messages
+          allow create: if isOwner(userId) && isValidMessage(request.resource.data, userId);
+          
+          // Messages are generally immutable, but allow update for error flags if needed
+          allow update: if isOwner(userId) && isValidMessage(request.resource.data, userId);
+          
+          // Users can delete their own messages
+          allow delete: if isOwner(userId) || isAdmin();
+        }
+      }
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

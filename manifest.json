@@ -1,0 +1,17 @@
+{
+  "name": "Worp AI",
+  "short_name": "Worp",
+  "description": "A dynamic, atmospheric AI chat interface.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#1ed18a",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
